@@ -13,6 +13,8 @@
 
 Для работы с EtherCAT с надо также установить Npcap (https://nmap.org/npcap/). При установки должна стоять галочка **"WinPcap API-compatible mode"**
 
+![img](img.png)
+
 ### Установка 
 - Visual Studio 2019, git и CMake уже установлены ранее при попытке сделать на C#
 - выполнить `git clone https://github.com/OpenEtherCATsociety/SOEM.git` в подходящую папку
