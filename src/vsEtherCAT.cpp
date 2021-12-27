@@ -2,10 +2,6 @@
  * \brief Example code for Simple Open EtherCAT master
  */
 
-#ifndef UNICODE
-#define UNICODE
-#endif 
-
 #include <stdio.h>
 #include <string.h>
  //#include <Mmsystem.h>
@@ -17,6 +13,7 @@
 
 #include <windows.h>
 #include <conio.h>
+#include <ctime>
 
 #define EC_TIMEOUTMON 500
 
@@ -31,6 +28,7 @@ uint8 currentgroup = 0;
 menu_t menu;
 HANDLE hStdin;
 DWORD fdwSaveOldMode;
+static char alarm_msg[70] = "";
 
 void print_menu(void);
 
@@ -43,19 +41,20 @@ void CALLBACK RTthread(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1
     wkc = ec_receive_processdata(EC_TIMEOUTRET);
     rtcnt++;
     /* do RT control stuff here */
+    int offset = (menu.pos_port ? 128 : 0);
     switch (menu.mode)
     {
     case MENU_OUT_ALL_ENABLE:
-        memset(&ec_slave[menu.pos_slave].outputs[1], menu.value & 0xFF, 127);
+        memset(&ec_slave[menu.pos_slave].outputs[1 + offset], menu.value & 0xFF, 127);
         break;
     case MENU_OUT_ALL_DISABLE:
-        memset(&ec_slave[menu.pos_slave].outputs[1], 0, 127);
+        memset(&ec_slave[menu.pos_slave].outputs[1 + offset], 0, 127);
         break;
     case MENU_OUT_BLINK_ALL:
         if (menu.mode_tmr > MENU_MODE_TMR/2)
-            memset(&ec_slave[menu.pos_slave].outputs[1], menu.value & 0xFF, 127);
+            memset(&ec_slave[menu.pos_slave].outputs[1 + offset], menu.value & 0xFF, 127);
         else
-            memset(&ec_slave[menu.pos_slave].outputs[1], 0, 127);
+            memset(&ec_slave[menu.pos_slave].outputs[1 + offset], 0, 127);
         if (menu.mode_tmr-- < 0)
             menu.mode_tmr = MENU_MODE_TMR;
         break;
@@ -64,12 +63,9 @@ void CALLBACK RTthread(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1
             menu.mode_tmr = MENU_MODE_TMR;
             if (menu.pos_out++ > 127) menu.pos_out = 1;
         }
-        for (int i = 1; i <= 127; i++)
-            *(ec_slave[0].outputs + i) = (menu.pos_out == i ? menu.value : 0);
-        break;
     default:
         for (int i = 1; i <= 127; i++)
-            *(ec_slave[0].outputs + i) = (menu.pos_out == i ? menu.value : 0);
+            *(ec_slave[menu.pos_slave].outputs + i + offset) = (menu.pos_out == i ? menu.value : 0);
         break;
     }
             
@@ -82,7 +78,7 @@ void simpletest(char* ifname)
     UINT mmResult;
 
     inOP = FALSE;
-
+    clock_t begin = clock();
     printf("Starting simple test\n");
 
     /* initialise SOEM, bind socket to ifname */
@@ -94,7 +90,8 @@ void simpletest(char* ifname)
         if (ec_config_init(FALSE) > 0)
         {
             printf("%d slaves found and configured.\n", ec_slavecount);
-
+            Sleep(100);
+            printf("Config map. Please wait...\n");
             ec_config_map(&IOmap);
 
             ec_configdc();
@@ -129,7 +126,7 @@ void simpletest(char* ifname)
             /* wait for all slaves to reach OP state */
             do
             {
-                ec_statecheck(0, EC_STATE_OPERATIONAL, 50000);
+                ec_statecheck(0, EC_STATE_OPERATIONAL, 100000);
             } while (chk-- && (ec_slave[0].state != EC_STATE_OPERATIONAL));
             if (ec_slave[0].state == EC_STATE_OPERATIONAL)
             {
@@ -137,10 +134,14 @@ void simpletest(char* ifname)
                 for (int i = 1; i <= ec_slavecount; i++) 
                     printf("%s | ", ec_slave[i].name);
                 printf("\n");
+                Sleep(500);
                 con_clear();
 
                 wkc_count = 0;
                 inOP = TRUE;
+                clock_t end = clock();
+                double elapsed_secs = double(1.0*end - begin) / CLOCKS_PER_SEC;
+                sprintf_s(alarm_msg, "connection time = %6.2f s", elapsed_secs);
 
                 /* cyclic loop, reads data from RT thread */
                 //for (i = 1; i <= 500; i++)
@@ -208,7 +209,6 @@ void simpletest(char* ifname)
     }
 }
 
-static char alarm_msg[70] = "";
 //DWORD WINAPI ecatcheck( LPVOID lpParam )
 OSAL_THREAD_FUNC ecatcheck(void* lpParam)
 {
@@ -228,12 +228,14 @@ OSAL_THREAD_FUNC ecatcheck(void* lpParam)
                     ec_group[currentgroup].docheckstate = TRUE;
                     if (ec_slave[slave].state == (EC_STATE_SAFE_OP + EC_STATE_ERROR))
                     {
+                        ec_configdc();
                         sprintf_s(alarm_msg, "ERROR : slave %d is in SAFE_OP + ERROR, attempting ack.\n", slave);
                         ec_slave[slave].state = (EC_STATE_SAFE_OP + EC_STATE_ACK);
                         ec_writestate(slave);
                     }
                     else if (ec_slave[slave].state == EC_STATE_SAFE_OP)
                     {
+                        ec_configdc();
                         sprintf_s(alarm_msg, "WARNING : slave %d is in SAFE_OP, change to OPERATIONAL.\n", slave);
                         ec_slave[slave].state = EC_STATE_OPERATIONAL;
                         ec_writestate(slave);
@@ -243,6 +245,7 @@ OSAL_THREAD_FUNC ecatcheck(void* lpParam)
                         if (ec_reconfig_slave(slave, EC_TIMEOUTMON))
                         {
                             ec_slave[slave].islost = FALSE;
+                            ec_configdc();
                             sprintf_s(alarm_msg, "MESSAGE : slave %d reconfigured\n", slave);
                         }
                     }
@@ -253,6 +256,7 @@ OSAL_THREAD_FUNC ecatcheck(void* lpParam)
                         if (ec_slave[slave].state == EC_STATE_NONE)
                         {
                             ec_slave[slave].islost = TRUE;
+                            ec_configdc();
                             sprintf_s(alarm_msg, "ERROR : slave %d lost\n", slave);
                         }
                     }
@@ -264,12 +268,15 @@ OSAL_THREAD_FUNC ecatcheck(void* lpParam)
                         if (ec_recover_slave(slave, EC_TIMEOUTMON))
                         {
                             ec_slave[slave].islost = FALSE;
+                            ec_configdc();
                             sprintf_s(alarm_msg, "MESSAGE : slave %d recovered\n", slave);
                         }
                     }
                     else
                     {
                         ec_slave[slave].islost = FALSE;
+                        ec_configdc();
+                        ec_recover_slave(slave, EC_TIMEOUTMON);
                         sprintf_s(alarm_msg, "MESSAGE : slave %d found\n", slave);
                     }
                 }
@@ -288,7 +295,7 @@ char ifbuf[1024];
 char adapters_name[20][80] = { 0 };
 
 #define X_SLAVES 0
-#define X_PORTS (X_SLAVES + 8)
+#define X_PORTS (X_SLAVES + 11)
 #define X_INPUT  (X_PORTS + 14)
 #define X_OUTPUT (X_INPUT + 10*3 + 8)
 #define X_ALARM (X_PORTS)
@@ -317,15 +324,16 @@ void print_menu(void)
     printf("Test EtherCAT.");
     // adapter
     con_setxy(0, 1);
-    printf("Adapter : %s", ifbuf);
+    printf("Adapter: %s", ifbuf);
 
     // slaves
     con_setxy(X_SLAVES, Y_SLAVES);
-    printf("Slaves : ");
+    printf("Slaves: ");
     for (int i = 1; i <= min(ec_slavecount, 25 - Y_SLAVES); i++)
     {
         con_setxy(X_SLAVES, Y_SLAVES + i);
-        con_setcolor(i == menu.pos_slave ? 0x1F : 0x7);
+        con_setcolor(i == menu.pos_slave ? 
+            (menu.menu_pos == MENU_SLE && menu.mode_tmr++ & 1 ? 0x9F : 0x1F) : 0x7);
         printf("%7s  ", ec_slave[i].name);
     }
 
@@ -334,22 +342,22 @@ void print_menu(void)
     {
         con_setxy(X_PORTS, Y_PORTS);
         con_setcolor(0x7);
-        printf("Bus :");
-
-        con_setxy(X_PORTS, Y_PORTS + 1);
-        con_setcolor(menu.pos_port == 0 ? 0x1F : 0x7);
-        printf("portA");
-        con_setxy(X_PORTS, Y_PORTS + 2);
-        con_setcolor(menu.pos_port != 0 ? 0x1F : 0x7);
-        printf("portB");
+        printf("Bus:");
+        for (int i = 0; i < 2; i++) {
+            con_setxy(X_PORTS, Y_PORTS + 1 + i);
+            con_setcolor(menu.pos_port == i ? 
+                (menu.menu_pos == MENU_PORT && menu.mode_tmr++ & 1 ? 0x9F : 0x1F) : 0x7);
+            printf("port%c", 'A'+i);
+        }
     }
 
     // input 
+    int offset = (menu.pos_port ? 128 : 0);
     if (menu.menu_pos == MENU_VALUE)
     {
         con_setxy(X_INPUT, Y_INPUT);
         con_setcolor(0x7);
-        printf(" Input : ");
+        printf(" Input: ");
         for (int i = 0; i < 13; i++)
         {
             con_setxy(X_INPUT - 4, Y_INPUT + 1 + i);
@@ -359,8 +367,12 @@ void print_menu(void)
         {
             con_setxy(X_INPUT + (i % 10) * 3, Y_INPUT + 1 + i / 10);
 
-            uint32_t value = *(ec_slave[menu.pos_slave].inputs + i);
-            con_setcolor(value ? 0xD0 : (i & 1 ? 0x8 : 0) | 0x7);
+            uint32_t value = *(ec_slave[menu.pos_slave].inputs + i + offset);
+            int color = 0x7;
+            if (i & 1) color |= 0x8;
+            if (value == 0xFF) color |= 0x20; else
+                if (value) color |= 0x10;
+            con_setcolor(color);
             printf(" %02X", value);
         }
     }
@@ -369,7 +381,7 @@ void print_menu(void)
     {
         con_setxy(X_OUTPUT, Y_OUTPUT);
         con_setcolor(0x7);
-        printf(" Output : ");
+        printf(" Output: ");
         for (int i = 0; i < 13; i++)
         {
             con_setxy(X_OUTPUT - 5, Y_OUTPUT + 1 + i);
@@ -380,9 +392,9 @@ void print_menu(void)
         {
             con_setxy(X_OUTPUT + (i % 10) * 3, Y_OUTPUT + 1 + i / 10);
 
-            uint32_t value = *(ec_slave[menu.pos_slave].outputs + i);
+            uint32_t value = *(ec_slave[menu.pos_slave].outputs + i + offset);
             con_setcolor(value ? 0xE0 : (i & 1 ? 0x8 : 0) | 0x7);
-            printf("%02X ", value);
+            printf(" %02X", value);
         }
     }
     // alarm
@@ -390,15 +402,14 @@ void print_menu(void)
     {
         con_setxy(X_ALARM, Y_ALARM);
         con_setcolor(0xE);
-        printf("%s", alarm_msg);
-        memset(alarm_msg, 0, sizeof(alarm_msg));
+        printf("%70s", alarm_msg);
     }
 
 
     // control
     con_setxy(X_POS, Y_POS);
     con_setcolor(0x7);
-    printf("Pos=%d", menu.pos_out);
+    printf("Pos=%3d", menu.pos_out);
 
     con_setxy(X_POS, Y_POS+2);
     con_setcolor(0x7);
@@ -464,7 +475,7 @@ void print_menu(void)
     menu.key_char = 0;
 
     con_setxy(X_ALARM, Y_ALARM+1);    
-    printf(" T:%lld", ec_DCtime);
+    printf("T:%19lld  wkc=%3d", ec_DCtime, wkc);
 }
 
 void start_ethercat_thread(const char* name)
