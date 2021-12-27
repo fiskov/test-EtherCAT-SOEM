@@ -43,14 +43,36 @@ void CALLBACK RTthread(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1
     wkc = ec_receive_processdata(EC_TIMEOUTRET);
     rtcnt++;
     /* do RT control stuff here */
-    if (menu.all_enable)
+    switch (menu.mode)
+    {
+    case MENU_OUT_ALL_ENABLE:
         memset(&ec_slave[menu.pos_slave].outputs[1], menu.value & 0xFF, 127);
-    else
-        if (menu.all_disable)
-            memset(&ec_slave[menu.pos_slave].outputs[1], 0, 127);
+        break;
+    case MENU_OUT_ALL_DISABLE:
+        memset(&ec_slave[menu.pos_slave].outputs[1], 0, 127);
+        break;
+    case MENU_OUT_BLINK_ALL:
+        if (menu.mode_tmr > MENU_MODE_TMR/2)
+            memset(&ec_slave[menu.pos_slave].outputs[1], menu.value & 0xFF, 127);
         else
-            for (int i = 1; i <= 127; i++)
-                *(ec_slave[0].outputs + i) = (menu.pos_out == i ? menu.value : 0);
+            memset(&ec_slave[menu.pos_slave].outputs[1], 0, 127);
+        if (menu.mode_tmr-- < 0)
+            menu.mode_tmr = MENU_MODE_TMR;
+        break;
+    case MENU_OUT_BLINK_SINGLE:
+        if (menu.mode_tmr-- < 0) {
+            menu.mode_tmr = MENU_MODE_TMR;
+            if (menu.pos_out++ > 127) menu.pos_out = 1;
+        }
+        for (int i = 1; i <= 127; i++)
+            *(ec_slave[0].outputs + i) = (menu.pos_out == i ? menu.value : 0);
+        break;
+    default:
+        for (int i = 1; i <= 127; i++)
+            *(ec_slave[0].outputs + i) = (menu.pos_out == i ? menu.value : 0);
+        break;
+    }
+            
 
 }
 
@@ -290,7 +312,7 @@ void print_menu(void)
     menu.key = get_key(&menu.key_char);
 
     con_setxy(0, 0);
-    printf("Test EtherCAT. SolderingPoint Ltd.");
+    printf("Test EtherCAT.");
     // adapter
     con_setxy(0, 1);
     printf("Adapter : %s", ifbuf);
@@ -407,18 +429,16 @@ void print_menu(void)
 
         if (menu.key == VK_LEFT && menu.pos_out > 0) 
         {
-            menu.all_enable = false;
-            menu.all_disable = false;
+            menu.mode = MENU_OUT_NORMAL;
             menu.pos_out--;
         }
         if (menu.key == VK_RIGHT && menu.pos_out < 127)
         {
-            menu.all_enable = false;
-            menu.all_disable = false;
+            menu.mode = MENU_OUT_NORMAL;
             menu.pos_out++;
         }            
-        if (menu.key == VK_UP) { menu.all_enable = true; menu.all_disable = false;}
-        if (menu.key == VK_DOWN) { menu.all_enable = false; menu.all_disable = true; }
+        if (menu.key == VK_UP) { menu.mode = MENU_OUT_ALL_ENABLE; }
+        if (menu.key == VK_DOWN) { menu.mode = MENU_OUT_ALL_DISABLE; }
         if (menu.key == VK_ESCAPE) menu.menu_pos = MENU_PORT;
 
         if ((menu.key_char >= '0' && menu.key_char <= '9') || (menu.key_char >= 'a' && menu.key_char <= 'f')) {
@@ -427,6 +447,9 @@ void print_menu(void)
             if (c >= 'a' && c <= 'f') c = c-'a'+10;            
             menu.value = ((menu.value << 4) | c) & 0xFF;
         }
+        if (menu.key_char == '+') menu.mode = MENU_OUT_BLINK_ALL;
+        if (menu.key_char == '-') menu.mode = MENU_OUT_BLINK_SINGLE;
+
         break;
     }
     if (menu.key)
