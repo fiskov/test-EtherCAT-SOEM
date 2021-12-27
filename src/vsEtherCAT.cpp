@@ -182,6 +182,7 @@ void simpletest(char* ifname)
                             i, ec_slave[i].state, ec_slave[i].ALstatuscode, ec_ALstatuscode2string(ec_slave[i].ALstatuscode));
                     }
                 }
+                system("PAUSE");
             }
 
             /* stop RT thread */
@@ -194,7 +195,8 @@ void simpletest(char* ifname)
         }
         else
         {
-            printf("No slaves found!\n");
+            printf("\nNo slaves found!\n");
+            system("PAUSE");
         }
         printf("End simple test, close socket\n");
         /* stop SOEM, close socket */
@@ -504,7 +506,7 @@ int main(int argc, char* argv[])
         }
         printf("\nSelect adtapter [1..%d]: ", n);
         int pos = _getch() - '1';
-        if (pos > 0 && pos <= n)
+        if (pos >= 0 && pos <= n)
         {            
             printf("\nSelected %d = %s\n", pos+1, adapters_name[pos]);
             start_ethercat_thread(adapters_name[pos]);
@@ -514,7 +516,6 @@ int main(int argc, char* argv[])
             system("PAUSE");
         }        
     }
-    
     printf("End program\n");
     SetConsoleMode(hStdin, fdwSaveOldMode);
     return (0);
