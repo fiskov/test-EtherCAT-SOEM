@@ -42,21 +42,52 @@ void CALLBACK RTthread(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1
     rtcnt++;
     /* do RT control stuff here */
     int offset = (menu.pos_port ? 128 : 0);
+
     switch (menu.mode)
     {
-    case MENU_OUT_ALL_ENABLE:
-        memset(&ec_slave[menu.pos_slave].outputs[1 + offset], menu.value & 0xFF, 127);
+    case MENU_OUT_ALL:
+        memset(&ec_slave[menu.pos_slave].outputs[1 + offset], menu.value, 127);
         break;
-    case MENU_OUT_ALL_DISABLE:
+    case MENU_OUT_NONE:
         memset(&ec_slave[menu.pos_slave].outputs[1 + offset], 0, 127);
         break;
     case MENU_OUT_BLINK_ALL:
         if (menu.mode_tmr > MENU_MODE_TMR/2)
-            memset(&ec_slave[menu.pos_slave].outputs[1 + offset], menu.value & 0xFF, 127);
+            memset(&ec_slave[menu.pos_slave].outputs[1 + offset], menu.value, 127);
         else
             memset(&ec_slave[menu.pos_slave].outputs[1 + offset], 0, 127);
         if (menu.mode_tmr-- < 0)
             menu.mode_tmr = MENU_MODE_TMR;
+        break;
+    case MENU_OUT_ALL_SLE:
+        for (int i = 1; i <= ec_slavecount; i++) {
+            uint8_t SLE_type = ec_slave[i].name[4] - '0';
+            if (SLE_type == 1 || SLE_type ==3) 
+                memset(&ec_slave[i].outputs[1], menu.value, 127);
+            if (SLE_type == 1) 
+                memset(&ec_slave[i].outputs[128], menu.value, 127);
+
+            if (SLE_type == 2)
+                for (int j = 0; j < 128; j++) *(uint32_t*)(ec_slave[i].outputs + j * 4) =
+                    menu.value2;
+            if (SLE_type == 3)
+                for (int j = 0; j < 64; j++) *(uint32_t*)(ec_slave[i].outputs + j * 4 + 128) =
+                    menu.value2;
+        }
+        break;
+    case MENU_OUT_NONE_SLE:
+        for (int i = 1; i <= ec_slavecount; i++) {
+            uint8_t SLE_type = ec_slave[i].name[4] - '0';
+            if (SLE_type == 1 || SLE_type == 3)
+                memset(&ec_slave[i].outputs[1], 0, 127);
+            if (SLE_type == 1)
+                memset(&ec_slave[i].outputs[128], 0, 128);
+
+            if (SLE_type == 2)
+                memset(&ec_slave[i].outputs[0], 0, 64*4);
+            if (SLE_type == 3)
+                memset(&ec_slave[i].outputs[128], 0, 64*4);
+        }
         break;
     case MENU_OUT_BLINK_SINGLE:
         if (menu.mode_tmr-- < 0) {
@@ -64,8 +95,17 @@ void CALLBACK RTthread(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1
             if (menu.pos_out++ > 127) menu.pos_out = 1;
         }
     default:
-        for (int i = 1; i <= 127; i++)
-            *(ec_slave[menu.pos_slave].outputs + i + offset) = (menu.pos_out == i ? menu.value : 0);
+        uint8_t SLE_type = ec_slave[menu.pos_slave].name[4] - '0';
+        if (SLE_type == 1 || (SLE_type == 3 && menu.pos_port == 0))
+        {
+            for (int i = 1; i <= 127; i++)
+                *(ec_slave[menu.pos_slave].outputs + i + offset) = (menu.pos_out == i ? menu.value : 0);
+        }
+        else {
+            for (int i = 0; i <= 63; i++)
+                *(uint32_t *)(ec_slave[menu.pos_slave].outputs + i*4 + offset) =
+                    (menu.pos_out == i ? menu.value2 : 0);
+        }
         break;
     }
             
@@ -79,7 +119,7 @@ void simpletest(char* ifname)
 
     inOP = FALSE;
     clock_t begin = clock();
-    printf("Starting simple test\n");
+    printf("Starting Ethercat test. v%02d\n", VERSION);
 
     /* initialise SOEM, bind socket to ifname */
     if (ec_init(ifname))
@@ -134,7 +174,7 @@ void simpletest(char* ifname)
                 for (int i = 1; i <= ec_slavecount; i++) 
                     printf("%s | ", ec_slave[i].name);
                 printf("\n");
-                Sleep(500);
+                Sleep(100);
                 con_clear();
 
                 wkc_count = 0;
@@ -296,17 +336,17 @@ char adapters_name[20][80] = { 0 };
 
 #define X_SLAVES 0
 #define X_PORTS (X_SLAVES + 11)
-#define X_INPUT  (X_PORTS + 14)
-#define X_OUTPUT (X_INPUT + 10*3 + 8)
+#define X_INPUT  (X_PORTS + 11)
+#define X_OUTPUT (X_INPUT + 10*3 + 7)
 #define X_ALARM (X_PORTS)
-#define X_POS (X_OUTPUT + 10*3 + 4)
+#define X_POS (X_OUTPUT + 10*3 + 14)
 
 #define Y_SLAVES 3
 #define Y_PORTS  (Y_SLAVES)
 #define Y_INPUT  (Y_SLAVES)
 #define Y_OUTPUT (Y_SLAVES)
 #define Y_ALARM 22
-#define Y_POS (Y_PORTS + 4)
+#define Y_POS (1)
 
 void print_menu(void)
 {
@@ -316,12 +356,13 @@ void print_menu(void)
         memset(&menu, 0, sizeof(menu_t));
         menu.pos_slave = 1;
         menu.value = 0xFF;
+        menu.value2 = 0xF47F223D;
     }
 
     menu.key = get_key(&menu.key_char);
 
     con_setxy(0, 0);
-    printf("Test EtherCAT.");
+    printf("Test EtherCAT. v%02d",VERSION);
     // adapter
     con_setxy(0, 1);
     printf("Adapter: %s", ifbuf);
@@ -352,6 +393,7 @@ void print_menu(void)
     }
 
     // input 
+    uint8_t SLE_type = ec_slave[menu.pos_slave].name[4] - '0';
     int offset = (menu.pos_port ? 128 : 0);
     if (menu.menu_pos == MENU_VALUE)
     {
@@ -379,23 +421,36 @@ void print_menu(void)
     // output
     if (menu.menu_pos == MENU_VALUE)
     {
+        bool isLong = (SLE_type == 2 || (SLE_type == 3 && menu.pos_port == 1));
         con_setxy(X_OUTPUT, Y_OUTPUT);
         con_setcolor(0x7);
         printf(" Output: ");
         for (int i = 0; i < 13; i++)
         {
             con_setxy(X_OUTPUT - 5, Y_OUTPUT + 1 + i);
-            printf("|%3d|", i * 10);
+            printf("|%3d|", i * (isLong ? 5 : 10));
         }
 
-        for (int i = 0; i < 128; i++)
-        {
-            con_setxy(X_OUTPUT + (i % 10) * 3, Y_OUTPUT + 1 + i / 10);
+        // 1-byte SLE01, SLE03_portA
+        if (SLE_type == 1 || (SLE_type == 3 && menu.pos_port == 0) )
+            for (int i = 0; i < 128; i++)
+            {
+                con_setxy(X_OUTPUT + (i % 10) * 3, Y_OUTPUT + 1 + i / 10);
 
-            uint32_t value = *(ec_slave[menu.pos_slave].outputs + i + offset);
-            con_setcolor(value ? 0xE0 : (i & 1 ? 0x8 : 0) | 0x7);
-            printf(" %02X", value);
-        }
+                uint8_t value = *(ec_slave[menu.pos_slave].outputs + i + offset);
+                con_setcolor(value ? 0xE0 : (i & 1 ? 0x8 : 0) | 0x7);
+                printf(" %02X", value);
+            }
+        if (SLE_type == 2 || (SLE_type == 3 && menu.pos_port == 1))
+            for (int i = 0; i < 64; i++)
+            {
+                con_setxy(X_OUTPUT + (i % 5) * 9, Y_OUTPUT + 1 + i / 5);
+
+                uint32_t value = *(uint32_t*)(ec_slave[menu.pos_slave].outputs +
+                    i * sizeof(uint32_t) + offset);
+                con_setcolor(value ? 0xE0 : (i & 1 ? 0x8 : 0) | 0x7);
+                printf(" %08X", value);
+            }
     }
     // alarm
     if (strlen(alarm_msg) > 0)
@@ -413,7 +468,10 @@ void print_menu(void)
 
     con_setxy(X_POS, Y_POS+2);
     con_setcolor(0x7);
-    printf("Value=%02X", menu.value);
+    if (SLE_type == 2 || (SLE_type == 3 && menu.pos_port == 1))
+        printf("Value=%08X", menu.value2);
+    else
+        printf("Value=%02X", menu.value);
 
     // end
     con_setxy(X_ALARM, Y_ALARM - 3);
@@ -421,11 +479,21 @@ void print_menu(void)
 
     switch (menu.menu_pos) {
     case MENU_SLE:
-        printf("Press 'UP', 'DOWN', 'ENTER' for select SLE");
-        if ((menu.key == VK_UP || menu.key == VK_LEFT) && menu.pos_slave > 1) menu.pos_slave--;
-        if ((menu.key == VK_DOWN || menu.key == VK_RIGHT) && menu.pos_slave < ec_slavecount) menu.pos_slave++;
+        printf("Press 'UP', 'DOWN', 'ENTER' for select SLE. 'F1' = enable all SLE, 'F2' = dinable all SLE");
+        {
+            int pos = menu.pos_slave;
+            if (menu.key == VK_UP || menu.key == VK_LEFT) pos--;
+            if (menu.key == VK_DOWN || menu.key == VK_RIGHT) pos++;
+            if (pos < 1) pos = ec_slavecount;
+            if (pos > ec_slavecount) pos = 1;
+            menu.pos_slave = pos;
+        }
+
         if (menu.key == VK_RETURN) menu.menu_pos = MENU_PORT;
         if (menu.key == VK_ESCAPE) menu.menu_pos = MENU_EXIT;
+        if (menu.key == VK_F1) menu.mode = MENU_OUT_ALL_SLE;
+        if (menu.key == VK_F2) menu.mode = MENU_OUT_NONE_SLE;
+
         break;
     case MENU_PORT:
         printf("Press 'UP', 'DOWN', 'ENTER' for select PORT, 'ESC' for back to SLE");
@@ -437,28 +505,38 @@ void print_menu(void)
     case MENU_VALUE:
         printf("Press 'UP' = all enable, 'DOWN' = all disable, 'LEFT' = pos-1, 'RIGHT' = pos+1,"
             "'ESC' for back to PORT");
+        con_setxy(X_ALARM, Y_ALARM - 1);
+        printf("'+' = blink all, '-' = auto++, 'F1' = enable all SLE, 'F2' = dinable all SLE");
         con_setxy(X_ALARM, Y_ALARM - 2);
         printf("Press '0123456789abcdef' for edit value");
-
-        if (menu.key == VK_LEFT && menu.pos_out > 0) 
         {
-            menu.mode = MENU_OUT_NORMAL;
-            menu.pos_out--;
+            int pos = menu.pos_out;
+            int pos_max = 127;
+            if (SLE_type == 2 || (SLE_type == 3 && menu.pos_port == 1)) pos_max = 63;
+            if (menu.key == VK_LEFT) {
+                menu.mode = MENU_OUT_NORMAL;
+                pos--;
+            }
+            if (menu.key == VK_RIGHT) {
+                menu.mode = MENU_OUT_NORMAL;
+                pos++;
+            }
+            if (pos > pos_max) pos = 0;
+            if (pos < 0) pos = pos_max;
+            menu.pos_out = pos;
         }
-        if (menu.key == VK_RIGHT && menu.pos_out < 127)
-        {
-            menu.mode = MENU_OUT_NORMAL;
-            menu.pos_out++;
-        }            
-        if (menu.key == VK_UP) { menu.mode = MENU_OUT_ALL_ENABLE; }
-        if (menu.key == VK_DOWN) { menu.mode = MENU_OUT_ALL_DISABLE; }
+        if (menu.key == VK_UP) menu.mode = MENU_OUT_ALL;
+        if (menu.key == VK_DOWN) menu.mode = MENU_OUT_NONE;
         if (menu.key == VK_ESCAPE) menu.menu_pos = MENU_PORT;
+        if (menu.key == VK_F1) menu.mode = MENU_OUT_ALL_SLE;
+        if (menu.key == VK_F2) menu.mode = MENU_OUT_NONE_SLE;
 
         if ((menu.key_char >= '0' && menu.key_char <= '9') || (menu.key_char >= 'a' && menu.key_char <= 'f')) {
             char c = menu.key_char & 0xFF;
             if (c >= '0' && c <= '9') c = c-'0';
             if (c >= 'a' && c <= 'f') c = c-'a'+10;            
             menu.value = ((menu.value << 4) | c) & 0xFF;
+            menu.value2 = ((menu.value2 << 4) | c);
         }
         if (menu.key_char == '+') menu.mode = MENU_OUT_BLINK_ALL;
         if (menu.key_char == '-') menu.mode = MENU_OUT_BLINK_SINGLE;
@@ -494,7 +572,7 @@ int main(int argc, char* argv[])
     SetConsoleMode(hStdin, ENABLE_WINDOW_INPUT);
 
     con_clear();
-    printf("SOEM (Simple Open EtherCAT Master)\nSimple test\n");
+    printf("SOEM (Simple Open EtherCAT Master). Simple test v%02d\n", VERSION);
 
     if (argc > 1)
     {

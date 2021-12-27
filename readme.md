@@ -13,15 +13,15 @@
 Самый верный способ, т.к. решения на C#, Python (или node.js, который вовсе не установился из npm) основаны на библиотеке SOEM (https://github.com/OpenEtherCATsociety/SOEM). 
 Библиотека компилируется в набор *.lib-файлов.
 
-Для работы с EtherCAT с надо также установить Npcap (https://nmap.org/npcap/). При установки должна стоять галочка **"WinPcap API-compatible mode"**
+Для работы с EtherCAT с надо также установить Npcap (https://nmap.org/npcap/). При установке должна стоять галочка **"WinPcap API-compatible mode"**
 
 ![img](img.png)
 
-### Установка 
-- Visual Studio 2019, git и CMake уже установлены ранее при попытке сделать на C#
+### Компиляция библиотеки SOEM
+- Visual Studio 2019, git и CMake
 - выполнить `git clone https://github.com/OpenEtherCATsociety/SOEM.git` в подходящую папку
 - создать в этой же папке каталог `build` в который необходимо зайти из "x86 Native Tools Command Prompt for VS 2019". Нужна версия именно x86, т.к. библиотека собирается для 32-бит.
-- `cmake .. -G "NMake Makefiles"` выполнится генерация make-файла на основе CMakeLists.txt из корневого каталога (если нужны примеры из test\win32, то надо их прописать и в нужных папках добавить свой CMakeLists.txt)
+- `cmake .. -G "NMake Makefiles"` выполнится генерация make-файла на основе CMakeLists.txt из корневого каталога (если нужны примеры из test\win32, то надо их прописать и в нужных папках добавить соответствующий CMakeLists.txt)
 - `nmake` всё скомпилируется MSVS компилятором. 
 
 ### Создание проекта
