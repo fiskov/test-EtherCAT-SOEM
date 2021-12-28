@@ -20,7 +20,8 @@ typedef enum {
 	MENU_OUT_BLINK_SINGLE,
 	MENU_OUT_BLINK_ALL,
 	MENU_OUT_ALL_SLE,
-	MENU_OUT_NONE_SLE
+	MENU_OUT_NONE_SLE,
+	MENU_OUT_BLINK_SLE
 } menu_out_mode_t;
 
 typedef struct {

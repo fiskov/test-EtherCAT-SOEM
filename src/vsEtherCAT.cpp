@@ -32,6 +32,51 @@ static char alarm_msg[70] = "";
 
 void print_menu(void);
 
+int get_max_reg(uint8_t sle_no, uint8_t port, int *offset, uint8_t * SLE_type) {
+    *offset = 0;
+    int res = 0;
+    *SLE_type = ec_slave[sle_no].name[4] - '0';
+
+    if (port == 0) {
+        res = (*SLE_type == 2) ? 64 : 128;
+    }
+    else {
+        *offset = (*SLE_type == 1 || *SLE_type == 3) ? 128 : 256;
+        res = (*SLE_type == 2 || *SLE_type == 3) ? 64 : 128;
+    }
+    return res;
+}
+
+void fill_SLE_port(uint8_t sle_no, uint8_t port, bool enable) {
+    int offset = (port ? 128 : 0);
+    uint8_t SLE_type = ec_slave[sle_no].name[4] - '0';
+
+    if (port == 0)
+    {
+        if (SLE_type == 1 || SLE_type == 3)
+            memset(ec_slave[sle_no].outputs, (enable ? menu.value : 0), 128);
+        if (SLE_type == 2)
+            for (int j = 0; j < 128; j++) *(uint32_t*)(ec_slave[sle_no].outputs + j * 4) =
+                (enable ? menu.value2 : 0);
+    } else {
+        if (SLE_type == 1)
+            memset(&ec_slave[sle_no].outputs[128], enable ? menu.value : 0, 128);
+        if (SLE_type == 2)
+            for (int j = 0; j < 128; j++) *(uint32_t*)(ec_slave[sle_no].outputs + j * 4 + 64*4) =
+                (enable ? menu.value2 : 0);
+        if (SLE_type == 3)
+            for (int j = 0; j < 64; j++) *(uint32_t*)(ec_slave[sle_no].outputs + j * 4 + 128) =
+                (enable ? menu.value2 : 0);
+    }
+}
+void fill_SLE_all(bool enable) {
+    for (int i = 1; i <= ec_slavecount; i++) {
+        fill_SLE_port(i, 0, enable);
+        fill_SLE_port(i, 1, enable);
+    }
+}
+
+
 /* most basic RT thread for process data, just does IO transfer */
 void CALLBACK RTthread(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2)
 {
@@ -41,71 +86,45 @@ void CALLBACK RTthread(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1
     wkc = ec_receive_processdata(EC_TIMEOUTRET);
     rtcnt++;
     /* do RT control stuff here */
-    int offset = (menu.pos_port ? 128 : 0);
+
+    if (--menu.mode_tmr < 0) menu.mode_tmr = MENU_MODE_TMR;
 
     switch (menu.mode)
     {
     case MENU_OUT_ALL:
-        memset(&ec_slave[menu.pos_slave].outputs[1 + offset], menu.value, 127);
+        fill_SLE_port(menu.pos_slave, menu.pos_port, true);
         break;
     case MENU_OUT_NONE:
-        memset(&ec_slave[menu.pos_slave].outputs[1 + offset], 0, 127);
+        fill_SLE_port(menu.pos_slave, menu.pos_port, false);
         break;
     case MENU_OUT_BLINK_ALL:
-        if (menu.mode_tmr > MENU_MODE_TMR/2)
-            memset(&ec_slave[menu.pos_slave].outputs[1 + offset], menu.value, 127);
-        else
-            memset(&ec_slave[menu.pos_slave].outputs[1 + offset], 0, 127);
-        if (menu.mode_tmr-- < 0)
-            menu.mode_tmr = MENU_MODE_TMR;
+        fill_SLE_port(menu.pos_slave, menu.pos_port, (menu.mode_tmr > MENU_MODE_TMR / 2));
         break;
     case MENU_OUT_ALL_SLE:
-        for (int i = 1; i <= ec_slavecount; i++) {
-            uint8_t SLE_type = ec_slave[i].name[4] - '0';
-            if (SLE_type == 1 || SLE_type ==3) 
-                memset(&ec_slave[i].outputs[1], menu.value, 127);
-            if (SLE_type == 1) 
-                memset(&ec_slave[i].outputs[128], menu.value, 127);
-
-            if (SLE_type == 2)
-                for (int j = 0; j < 128; j++) *(uint32_t*)(ec_slave[i].outputs + j * 4) =
-                    menu.value2;
-            if (SLE_type == 3)
-                for (int j = 0; j < 64; j++) *(uint32_t*)(ec_slave[i].outputs + j * 4 + 128) =
-                    menu.value2;
-        }
+        fill_SLE_all(true);
         break;
     case MENU_OUT_NONE_SLE:
-        for (int i = 1; i <= ec_slavecount; i++) {
-            uint8_t SLE_type = ec_slave[i].name[4] - '0';
-            if (SLE_type == 1 || SLE_type == 3)
-                memset(&ec_slave[i].outputs[1], 0, 127);
-            if (SLE_type == 1)
-                memset(&ec_slave[i].outputs[128], 0, 128);
-
-            if (SLE_type == 2)
-                memset(&ec_slave[i].outputs[0], 0, 64*4);
-            if (SLE_type == 3)
-                memset(&ec_slave[i].outputs[128], 0, 64*4);
-        }
+        fill_SLE_all(false);
+        break;
+    case MENU_OUT_BLINK_SLE:
+        fill_SLE_all((menu.mode_tmr > MENU_MODE_TMR / 2));
         break;
     case MENU_OUT_BLINK_SINGLE:
-        if (menu.mode_tmr-- < 0) {
-            menu.mode_tmr = MENU_MODE_TMR;
-            if (menu.pos_out++ > 127) menu.pos_out = 1;
-        }
+        if (menu.mode_tmr == MENU_MODE_TMR)
+            menu.pos_out++;
     default:
-        uint8_t SLE_type = ec_slave[menu.pos_slave].name[4] - '0';
-        if (SLE_type == 1 || (SLE_type == 3 && menu.pos_port == 0))
-        {
-            for (int i = 1; i <= 127; i++)
-                *(ec_slave[menu.pos_slave].outputs + i + offset) = (menu.pos_out == i ? menu.value : 0);
-        }
-        else {
-            for (int i = 0; i <= 63; i++)
-                *(uint32_t *)(ec_slave[menu.pos_slave].outputs + i*4 + offset) =
-                    (menu.pos_out == i ? menu.value2 : 0);
-        }
+        fill_SLE_port(menu.pos_slave, menu.pos_port, false);
+        int offset; uint8_t SLE_type;
+        int max_reg = get_max_reg(menu.pos_slave, menu.pos_port, &offset, &SLE_type);
+        int width = (max_reg == 64 ? 4 : 1);
+
+        if (menu.pos_out >= max_reg) menu.pos_out = 0;
+
+        if (max_reg != 64)
+            *(ec_slave[menu.pos_slave].outputs + menu.pos_out + offset) = menu.value;
+        else
+            *(uint32_t*)(ec_slave[menu.pos_slave].outputs + menu.pos_out * 4 + offset) = menu.value2;
+
         break;
     }
             
@@ -479,7 +498,7 @@ void print_menu(void)
 
     switch (menu.menu_pos) {
     case MENU_SLE:
-        printf("Press 'UP', 'DOWN', 'ENTER' for select SLE. 'F1' = enable all SLE, 'F2' = dinable all SLE");
+        printf("Press 'UP', 'DOWN', 'ENTER' for select SLE, 'F1' = enable all, 'F2' = dinable all, 'F3' = blink all");
         {
             int pos = menu.pos_slave;
             if (menu.key == VK_UP || menu.key == VK_LEFT) pos--;
@@ -493,6 +512,7 @@ void print_menu(void)
         if (menu.key == VK_ESCAPE) menu.menu_pos = MENU_EXIT;
         if (menu.key == VK_F1) menu.mode = MENU_OUT_ALL_SLE;
         if (menu.key == VK_F2) menu.mode = MENU_OUT_NONE_SLE;
+        if (menu.key == VK_F3) menu.mode = MENU_OUT_BLINK_SLE;
 
         break;
     case MENU_PORT:
@@ -506,7 +526,7 @@ void print_menu(void)
         printf("Press 'UP' = all enable, 'DOWN' = all disable, 'LEFT' = pos-1, 'RIGHT' = pos+1,"
             "'ESC' for back to PORT");
         con_setxy(X_ALARM, Y_ALARM - 1);
-        printf("'+' = blink all, '-' = auto++, 'F1' = enable all SLE, 'F2' = dinable all SLE");
+        printf("'+' = blink all, '-' = auto++, 'F1' = enable all SLE, 'F2' = dinable all SLE, 'F3' = blink all SLE");
         con_setxy(X_ALARM, Y_ALARM - 2);
         printf("Press '0123456789abcdef' for edit value");
         {
@@ -530,13 +550,16 @@ void print_menu(void)
         if (menu.key == VK_ESCAPE) menu.menu_pos = MENU_PORT;
         if (menu.key == VK_F1) menu.mode = MENU_OUT_ALL_SLE;
         if (menu.key == VK_F2) menu.mode = MENU_OUT_NONE_SLE;
+        if (menu.key == VK_F3) menu.mode = MENU_OUT_BLINK_SLE;
 
         if ((menu.key_char >= '0' && menu.key_char <= '9') || (menu.key_char >= 'a' && menu.key_char <= 'f')) {
             char c = menu.key_char & 0xFF;
             if (c >= '0' && c <= '9') c = c-'0';
-            if (c >= 'a' && c <= 'f') c = c-'a'+10;            
-            menu.value = ((menu.value << 4) | c) & 0xFF;
-            menu.value2 = ((menu.value2 << 4) | c);
+            if (c >= 'a' && c <= 'f') c = c-'a'+10;  
+            if (SLE_type == 1 || (SLE_type == 3 && menu.pos_port == 0))
+                menu.value = ((menu.value << 4) | c);
+            else
+                menu.value2 = ((menu.value2 << 4) | c);
         }
         if (menu.key_char == '+') menu.mode = MENU_OUT_BLINK_ALL;
         if (menu.key_char == '-') menu.mode = MENU_OUT_BLINK_SINGLE;
