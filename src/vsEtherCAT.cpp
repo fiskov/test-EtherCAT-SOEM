@@ -75,6 +75,22 @@ void fill_SLE_all(bool enable) {
         fill_SLE_port(i, 1, enable);
     }
 }
+void fill_SLE_and_switch_on(bool enable)
+{
+    fill_SLE_port(menu.pos_slave, menu.pos_port, false);
+    int offset; uint8_t SLE_type;
+    int max_reg = get_max_reg(menu.pos_slave, menu.pos_port, &offset, &SLE_type);
+    int width = (max_reg == 64 ? 4 : 1);
+
+    if (menu.pos_out >= max_reg) menu.pos_out = 0;
+    if (enable)
+    {
+        if (max_reg != 64)
+            *(ec_slave[menu.pos_slave].outputs + menu.pos_out + offset) = menu.value;
+        else
+            *(uint32_t*)(ec_slave[menu.pos_slave].outputs + menu.pos_out * 4 + offset) = menu.value2;
+    }
+}
 
 
 /* most basic RT thread for process data, just does IO transfer */
@@ -109,22 +125,11 @@ void CALLBACK RTthread(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1
     case MENU_OUT_BLINK_SLE:
         fill_SLE_all((menu.mode_tmr > MENU_MODE_TMR / 2));
         break;
-    case MENU_OUT_BLINK_SINGLE:
+    case MENU_OUT_AUTO_INC:
         if (menu.mode_tmr == MENU_MODE_TMR)
             menu.pos_out++;
     default:
-        fill_SLE_port(menu.pos_slave, menu.pos_port, false);
-        int offset; uint8_t SLE_type;
-        int max_reg = get_max_reg(menu.pos_slave, menu.pos_port, &offset, &SLE_type);
-        int width = (max_reg == 64 ? 4 : 1);
-
-        if (menu.pos_out >= max_reg) menu.pos_out = 0;
-
-        if (max_reg != 64)
-            *(ec_slave[menu.pos_slave].outputs + menu.pos_out + offset) = menu.value;
-        else
-            *(uint32_t*)(ec_slave[menu.pos_slave].outputs + menu.pos_out * 4 + offset) = menu.value2;
-
+        fill_SLE_and_switch_on(menu.blinking ? (menu.mode_tmr & 1) : true);
         break;
     }
             
@@ -490,7 +495,7 @@ void print_menu(void)
     if (SLE_type == 2 || (SLE_type == 3 && menu.pos_port == 1))
         printf("Value=%08X", menu.value2);
     else
-        printf("Value=%02X", menu.value);
+        printf("Value=%02X      ", menu.value);
 
     // end
     con_setxy(X_ALARM, Y_ALARM - 3);
@@ -528,7 +533,7 @@ void print_menu(void)
         con_setxy(X_ALARM, Y_ALARM - 1);
         printf("'+' = blink all, '-' = auto++, 'F1' = enable all SLE, 'F2' = dinable all SLE, 'F3' = blink all SLE");
         con_setxy(X_ALARM, Y_ALARM - 2);
-        printf("Press '0123456789abcdef' for edit value");
+        printf("Press '0123456789abcdef' for edit value. '*' = blink single");
         {
             int pos = menu.pos_out;
             int pos_max = 127;
@@ -551,6 +556,7 @@ void print_menu(void)
         if (menu.key == VK_F1) menu.mode = MENU_OUT_ALL_SLE;
         if (menu.key == VK_F2) menu.mode = MENU_OUT_NONE_SLE;
         if (menu.key == VK_F3) menu.mode = MENU_OUT_BLINK_SLE;
+        if (menu.key == VK_HOME) menu.pos_out = 0;
 
         if ((menu.key_char >= '0' && menu.key_char <= '9') || (menu.key_char >= 'a' && menu.key_char <= 'f')) {
             char c = menu.key_char & 0xFF;
@@ -562,7 +568,8 @@ void print_menu(void)
                 menu.value2 = ((menu.value2 << 4) | c);
         }
         if (menu.key_char == '+') menu.mode = MENU_OUT_BLINK_ALL;
-        if (menu.key_char == '-') menu.mode = MENU_OUT_BLINK_SINGLE;
+        if (menu.key_char == '-') menu.mode = MENU_OUT_AUTO_INC;
+        if (menu.key_char == '*') menu.blinking = !menu.blinking;
 
         break;
     }

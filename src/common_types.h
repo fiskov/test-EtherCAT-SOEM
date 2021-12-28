@@ -3,7 +3,7 @@
 
 #include <windows.h>
 
-#define VERSION 02
+#define VERSION 03
 
 #define MENU_MODE_TMR 1000
 
@@ -17,7 +17,7 @@ typedef enum {
 	MENU_OUT_NORMAL,
 	MENU_OUT_ALL,
 	MENU_OUT_NONE,
-	MENU_OUT_BLINK_SINGLE,
+	MENU_OUT_AUTO_INC,
 	MENU_OUT_BLINK_ALL,
 	MENU_OUT_ALL_SLE,
 	MENU_OUT_NONE_SLE,
@@ -30,6 +30,7 @@ typedef struct {
 	char key_char;
 	int pos_slave, pos_port;
 	int pos_out, value2, mode_tmr;
+	bool blinking;
 	uint8_t value;
 	menu_out_mode_t mode;
 } menu_t;
