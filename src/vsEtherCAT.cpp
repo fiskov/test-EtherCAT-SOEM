@@ -1,14 +1,14 @@
 /** \file
  * \brief Example code for Simple Open EtherCAT master
  */
-
+typedef struct IUnknown IUnknown;
 #include <stdio.h>
 #include <string.h>
  //#include <Mmsystem.h>
 
 #include "osal.h"
 #include "ethercat.h"
-#include "common_types.h"
+#include "common.h"
 #include "con_helper.h"
 
 #include <windows.h>
@@ -29,7 +29,7 @@ menu_t menu;
 HANDLE hStdin;
 DWORD fdwSaveOldMode;
 static char alarm_msg[70] = "";
-
+static uint8_t bfr_color[128] = { 0 }; 
 void print_menu(void);
 
 int get_max_reg(uint8_t sle_no, uint8_t port, int *offset, uint8_t * SLE_type) {
@@ -132,8 +132,6 @@ void CALLBACK RTthread(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1
         fill_SLE_and_switch_on(menu.blinking ? (menu.mode_tmr & 1) : true);
         break;
     }
-            
-
 }
 
 void simpletest(char* ifname)
@@ -260,7 +258,7 @@ void simpletest(char* ifname)
         }
         else
         {
-            printf("\nNo slaves found!\n");
+            printf("\nNo slaves found!\n\n");
             system("PAUSE");
         }
         printf("End simple test, close socket\n");
@@ -361,7 +359,7 @@ char adapters_name[20][80] = { 0 };
 #define X_SLAVES 0
 #define X_PORTS (X_SLAVES + 11)
 #define X_INPUT  (X_PORTS + 11)
-#define X_OUTPUT (X_INPUT + 10*3 + 7)
+#define X_OUTPUT (X_INPUT + 10*3 + 8)
 #define X_ALARM (X_PORTS)
 #define X_POS (X_OUTPUT + 10*3 + 14)
 
@@ -369,7 +367,7 @@ char adapters_name[20][80] = { 0 };
 #define Y_PORTS  (Y_SLAVES)
 #define Y_INPUT  (Y_SLAVES)
 #define Y_OUTPUT (Y_SLAVES)
-#define Y_ALARM 22
+#define Y_ALARM 23
 #define Y_POS (1)
 
 void print_menu(void)
@@ -394,7 +392,7 @@ void print_menu(void)
     // slaves
     con_setxy(X_SLAVES, Y_SLAVES);
     printf("Slaves: ");
-    for (int i = 1; i <= min(ec_slavecount, 25 - Y_SLAVES); i++)
+    for (int i = 1; i <= min(ec_slavecount, 24 - Y_SLAVES); i++)
     {
         con_setxy(X_SLAVES, Y_SLAVES + i);
         con_setcolor(i == menu.pos_slave ? 
@@ -424,6 +422,7 @@ void print_menu(void)
         con_setxy(X_INPUT, Y_INPUT);
         con_setcolor(0x7);
         printf(" Input: ");
+        // vertical numbers
         for (int i = 0; i < 13; i++)
         {
             con_setxy(X_INPUT - 4, Y_INPUT + 1 + i);
@@ -436,9 +435,12 @@ void print_menu(void)
             uint32_t value = *(ec_slave[menu.pos_slave].inputs + i + offset);
             int color = 0x7;
             if (i & 1) color |= 0x8;
+            
             if (value == 0xFF) color |= 0x20; else
                 if (value) color |= 0x10;
-            con_setcolor(color);
+            bfr_color[i] = max(bfr_color[i], color);
+
+            con_setcolor(bfr_color[i]);
             printf(" %02X", value);
         }
     }
@@ -449,10 +451,11 @@ void print_menu(void)
         con_setxy(X_OUTPUT, Y_OUTPUT);
         con_setcolor(0x7);
         printf(" Output: ");
-        for (int i = 0; i < 13; i++)
+        // vertical numbers
+        for (int i = 0; i <= 128/10; i++)
         {
             con_setxy(X_OUTPUT - 5, Y_OUTPUT + 1 + i);
-            printf("|%3d|", i * (isLong ? 5 : 10));
+            printf(" %3d|", i * (isLong ? 5 : 10));
         }
 
         // 1-byte SLE01, SLE03_portA
@@ -465,6 +468,7 @@ void print_menu(void)
                 con_setcolor(value ? 0xE0 : (i & 1 ? 0x8 : 0) | 0x7);
                 printf(" %02X", value);
             }
+        // 4-byte SLE02, SLE_portB
         if (SLE_type == 2 || (SLE_type == 3 && menu.pos_port == 1))
             for (int i = 0; i < 64; i++)
             {
@@ -533,7 +537,7 @@ void print_menu(void)
         con_setxy(X_ALARM, Y_ALARM - 1);
         printf("'+' = blink all, '-' = auto++, 'F1' = enable all SLE, 'F2' = dinable all SLE, 'F3' = blink all SLE");
         con_setxy(X_ALARM, Y_ALARM - 2);
-        printf("Press '0123456789abcdef' for edit value. '*' = blink single");
+        printf("Press '0123456789abcdef' for edit value. '*' = blink single. 'HOME' = pos=0");
         {
             int pos = menu.pos_out;
             int pos_max = 127;
@@ -557,7 +561,7 @@ void print_menu(void)
         if (menu.key == VK_F2) menu.mode = MENU_OUT_NONE_SLE;
         if (menu.key == VK_F3) menu.mode = MENU_OUT_BLINK_SLE;
         if (menu.key == VK_HOME) menu.pos_out = 0;
-
+        
         if ((menu.key_char >= '0' && menu.key_char <= '9') || (menu.key_char >= 'a' && menu.key_char <= 'f')) {
             char c = menu.key_char & 0xFF;
             if (c >= '0' && c <= '9') c = c-'0';
@@ -577,6 +581,9 @@ void print_menu(void)
     {
         if (menu.menu_pos_old != menu.menu_pos) con_clear();
         menu.menu_pos_old = menu.menu_pos;
+
+        //reset bfr of colors
+        memset(bfr_color, 0, sizeof(bfr_color));
 
         menu.key = 0;
     }
@@ -623,17 +630,23 @@ int main(int argc, char* argv[])
             n++;
             adapter = adapter->next;
         }
-        printf("\nSelect adtapter [1..%d]: ", n);
-        int pos = _getch() - '1';
-        if (pos >= 0 && pos <= n)
-        {            
-            printf("\nSelected %d = %s\n", pos+1, adapters_name[pos]);
-            start_ethercat_thread(adapters_name[pos]);
+        if (n > 0) {
+            printf("\nSelect adtapter [1..%d]: ", n);
+            int pos = _getch() - '1';
+            if (pos >= 0 && pos <= n)
+            {
+                printf("\nSelected %d = %s\n", pos + 1, adapters_name[pos]);
+                start_ethercat_thread(adapters_name[pos]);
+            }
+            else {
+                printf("\n\nIncorrect number!!!\n\n");
+                system("PAUSE");
+            }
         }
         else {
-            printf("\n\nIncorrect number!!!\n\n");
+            printf("\n\nNetwork adapters not found!!!\n\n");
             system("PAUSE");
-        }        
+        }
     }
     printf("End program\n");
     SetConsoleMode(hStdin, fdwSaveOldMode);

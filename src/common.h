@@ -3,7 +3,7 @@
 
 #include <windows.h>
 
-#define VERSION 03
+#define VERSION 04
 
 #define MENU_MODE_TMR 1000
 
